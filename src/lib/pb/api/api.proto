@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package api;
+option go_package = "api";
+
+// The greeting service definition.
+service DataApi {
+  // Send Byte String
+  rpc SendByteMsg (ByteStringRequest) returns (ByteStringReply) {}
+
+  // Send collected system info.
+  rpc SendSystemInfo (SystemInfoRequest) returns (SystemInfoReply) {}
+
+  // Send JSON Messages.
+  rpc SendJSONMessage(ByteStringRequest) returns (JSONMessageReply) {}
+}
+
+// Request for sending a byte string.
+message ByteStringRequest {
+  bytes ByteString = 1;
+}
+
+// Response to a byte string.
+message ByteStringReply {
+  enum Response {
+    SUCCESS = 0;
+    FAILURE = 1;
+    ERROR = 2;
+  }
+  Response resp = 1;
+}
+
+// Request with system info payload.
+message SystemInfoRequest {
+  uint64 TotalMemory = 1; 
+	uint64 AvailableMemory = 2; 
+	uint64 UsedMemory = 3;  
+	uint64 TotalDisk = 4; 
+  uint64 FreeDisk = 5; 
+  uint64 UsedDisk = 6;
+  string DiskPath = 7; 
+	string Hostname = 8; 
+	string OS = 9; 
+  uint64 Timestamp = 10; 
+}
+
+// Response for SystemInfoRequest.
+message SystemInfoReply {
+  enum Response {
+    SUCCESS = 0;
+    FAILURE = 1;
+    ERROR = 2;
+  }
+  Response resp = 1;
+}
+
+// Reply to SendJSONMessage()
+message JSONMessageReply {
+  enum Response {
+    SUCCESS_JSON = 0;
+    INVALID_PARSE = 1;
+    INVALID_DATA = 2;
+  }
+  Response resp = 1;
+}

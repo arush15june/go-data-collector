@@ -1,10 +1,7 @@
 package main
 
 //               Client
-// Connect to the server at DefaultConnectionUrl,
-// Collect system data using Collect.GetSystemInfo,
-// Pack it as JSON,
-// Transmit to the server every 1 second
+// Client for transmitting data to gRPC server every 1s
 
 import (
 	"log"
@@ -14,30 +11,30 @@ import (
 	Collect "../lib/collect"
 	Comm "../lib/communication"
 	Logger "../lib/logger"
-	Util "../lib/util"
 )
 
-const DefaultConnectionUrl = "tcp://127.0.0.0:1337"
+const (
+	DefaultConnectionURL = "13.234.126.213:1337"
+)
 
 var (
 	logger     *log.Logger
-	connection Comm.Connection
+	connection *Comm.DataAPIConnection
 )
 
 func main() {
 	// Initialize collector logger and server connections.
 	logger = Logger.NewLogger("client")
 
-	connection := Comm.NewConnection(DefaultConnectionUrl, "PAIR", logger, false)
-	connection.Run()
+	connection := Comm.NewConnection(DefaultConnectionURL, logger)
+	connection.Dial()
 
 	for {
 		var (
 			systemInfo = Collect.GetSystemInfo()
-			jsonString = Util.PackJSON(systemInfo)
 		)
-
-		connection.Send([]byte(jsonString))
+		resp := connection.SendSystemInfo(systemInfo)
+		logger.Println("Response: ", resp)
 		time.Sleep(1000 * time.Millisecond)
 	}
 

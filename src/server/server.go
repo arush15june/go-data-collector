@@ -1,9 +1,7 @@
 package main
 
-//                 Server
-// Establish listener on DefaultConnectionUrl,
-// Handle received messages via msgHandler,
-// msgHandler: log recvd messages
+//               Server
+// Server for receiviing data from gRPC server every 1s
 
 import (
 	"log"
@@ -13,24 +11,23 @@ import (
 	Logger "../lib/logger"
 )
 
-const DefaultConnectionUrl = "tcp://0.0.0.0:1337"
+const (
+	DefaultConnectionURL = ":1337"
+)
 
 var (
 	logger     *log.Logger
-	connection *Comm.Connection
+	connection *Comm.DataAPIConnection
 )
 
-func msgHandler(msg []byte) {
-	logger.Println("recvd: ", string(msg))
-}
+// gRPC Server Handlers
 
 func main() {
-	// Initilaize logger, listener
-	logger = Logger.NewLogger("server")
+	// Initialize collector logger and server connections.
+	logger = Logger.NewLogger("client")
 
-	logger.Println("Starting Server")
-	connection := Comm.NewConnection(DefaultConnectionUrl, "PAIR.SERVER", logger, false, msgHandler)
-	connection.Run()
+	connection := Comm.NewConnection(DefaultConnectionURL, logger)
+	connection.Listen()
 
 	os.Exit(0)
 }

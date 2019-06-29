@@ -8,6 +8,8 @@
 package collect
 
 import (
+	"encoding/json"
+	"os"
 	"runtime"
 	"strconv"
 	"time"
@@ -17,11 +19,35 @@ import (
 	"github.com/shirou/gopsutil/mem"
 )
 
-// DefaultWindowsPath is the default path for disk usage stats on windows
-const DefaultWindowsPath = "C:\\"
+// Container for collected system info.
 
-// DefaultLinuxPath is the default path for disk usage stats on linux.
-const DefaultLinuxPath = "/"
+type SystemInfoStat struct {
+	TotalMemory     uint64
+	AvailableMemory uint64
+	UsedMemory      uint64
+	TotalDisk       uint64
+	FreeDisk        uint64
+	UsedDisk        uint64
+	DiskPath        string
+	Hostname        string
+	OS              string
+	Timestamp       uint64
+}
+
+func (sysinfo SystemInfoStat) String() string {
+	val, err := json.Marshal(sysinfo)
+	if err != nil {
+		os.Exit(1)
+	}
+	return string(val)
+}
+
+const (
+	// DefaultWindowsPath is the default path for disk usage stats on windows
+	DefaultWindowsPath = "C:\\"
+	// DefaultLinuxPath is the default path for disk usage stats on linux.
+	DefaultLinuxPath = "/"
+)
 
 // getMemory retuns memory usage of the system.
 func getMemory() *mem.VirtualMemoryStat {
@@ -47,14 +73,42 @@ func getHostInfo() *host.InfoStat {
 	return info
 }
 
-// GetSystemInfo collects system info and returns it as a map[string]string.
-func GetSystemInfo() map[string]string {
-	var diskUsagePath string
+func getDiskPath() string {
 	if runtime.GOOS == "windows" {
-		diskUsagePath = DefaultWindowsPath
-	} else {
-		diskUsagePath = DefaultLinuxPath
+		return DefaultWindowsPath
 	}
+	return DefaultLinuxPath
+}
+
+func GetSystemInfo() SystemInfoStat {
+	diskUsagePath := getDiskPath()
+
+	var (
+		diskUsage = getDiskUsage(diskUsagePath)
+		memUsage  = getMemory()
+		hostInfo  = getHostInfo()
+		timestamp = uint64(time.Now().Unix())
+	)
+
+	systemInfo := SystemInfoStat{
+		memUsage.Total,
+		memUsage.Available,
+		memUsage.Used,
+		diskUsage.Total,
+		diskUsage.Free,
+		diskUsage.Used,
+		diskUsage.Path,
+		hostInfo.Hostname,
+		hostInfo.OS,
+		timestamp,
+	}
+
+	return systemInfo
+}
+
+// GetSystemInfoEx collects system info and returns it as a map[string]string.
+func GetSystemInfoEx() map[string]string {
+	diskUsagePath := getDiskPath()
 
 	var (
 		diskUsage = getDiskUsage(diskUsagePath)

@@ -1,132 +1,131 @@
-// Communicate via Mangos sockets.
-//
-// Exports
-// -------
-// type Connection struct
-//
-// NewConnection(
-// 	url string,
-// 	mode string,
-// 	logger *log.logger,
-// 	debug bool,
-// 	[msgHandler func([]byte)]
-// ) *Connection: Create a new connection.
-//
-// Connection.Run(): Initialize a connection.
-// Connection.Send([]byte): Send a byte string via the connection.
-// Connection.Recv() []byte: Receive a byte string via the conncetion.
-
 package communication
 
 import (
-	"fmt"
+	"context"
 	"log"
+	"net"
 	"time"
 
-	"nanomsg.org/go-mangos"
-	"nanomsg.org/go-mangos/protocol/pair"
-	"nanomsg.org/go-mangos/transport/tcp"
+	"google.golang.org/grpc"
+
+	Collect "../collect"
+	pb "../pb/api"
 )
 
-type Connection struct {
-	url         string
-	socket      mangos.Socket
-	logger      *log.Logger
-	connRoutine func()
-	msgHandler  func([]byte)
-	debug       bool
+// Communication wrapper for gRPC Transport
+
+type DataAPIConnection struct {
+	Logger     *log.Logger
+	Address    string
+	Connection *grpc.ClientConn
+	ApiClient  pb.DataApiClient
 }
 
-// logError logs an error variable via the connections logger.
-func (conn Connection) logError(err error) {
-	conn.logger.Println("error: ", fmt.Sprintf("can't listen on pair socket: %s", err.Error()))
+type ApiHandler struct {
+	ApiConn *DataAPIConnection
 }
 
-// NewConnection allocates a new Connection, sets up the logger, connection url, debug mode, creates a new socket,
-// select the correct routine to run, and returns the pointer to the Connection.
-func NewConnection(url string, mode string, logger *log.Logger, debug bool, optional ...interface{}) *Connection {
-	conn := new(Connection)
+func (handler *ApiHandler) SendByteMsg(ctx context.Context, inp *pb.ByteStringRequest) (*pb.ByteStringReply, error) {
+	val := inp.ByteString
+	handler.ApiConn.Logger.Println(val)
 
-	conn.logger = logger
-	conn.url = url
-	conn.debug = debug
-
-	if len(optional) > 0 {
-		conn.msgHandler = optional[0].(func([]byte))
+	resp := pb.ByteStringReply{
+		Resp: pb.ByteStringReply_SUCCESS,
 	}
 
-	var err error
-	if conn.socket, err = pair.NewSocket(); err != nil {
-		conn.logError(err)
-	}
-
-	conn.socket.AddTransport(tcp.NewTransport())
-
-	switch mode {
-	case "PAIR.SERVER":
-		conn.connRoutine = conn.server
-	case "PAIR.CLIENT":
-		conn.connRoutine = conn.client
-	case "PAIR":
-		conn.connRoutine = conn.client
-	}
-
-	return conn
+	return &resp, nil
 }
 
-// server listens for messages on the mangos socket bound to the connection and executes
-// the message handler when a message is received.
-func (conn Connection) server() {
-	var err error
-	var recvd []byte
-	if err = conn.socket.Listen(conn.url); err != nil {
-		conn.logger.Println("error: ", fmt.Sprintf("can't listen on pair socket: %s", err.Error()))
+func (handler *ApiHandler) SendJSONMessage(ctx context.Context, inp *pb.ByteStringRequest) (*pb.JSONMessageReply, error) {
+	val := inp.ByteString
+	handler.ApiConn.Logger.Println(val)
+
+	resp := pb.JSONMessageReply{
+		Resp: pb.JSONMessageReply_SUCCESS_JSON,
 	}
 
-	for {
-		conn.socket.SetOption(mangos.OptionRecvDeadline, 100*time.Millisecond)
-		if recvd, err = conn.Recv(); err == nil {
-			conn.msgHandler(recvd)
-		}
-
-	}
+	return &resp, nil
 }
 
-// client dials the TCP url.
-func (conn Connection) client() {
-	var err error
-	if err = conn.socket.Dial(conn.url); err != nil {
-		conn.logger.Println("error: ", fmt.Sprintf("can't dial on pair socket: %s", err.Error()))
+func (handler *ApiHandler) SendSystemInfo(ctx context.Context, inp *pb.SystemInfoRequest) (*pb.SystemInfoReply, error) {
+	handler.ApiConn.Logger.Println(inp)
+
+	resp := pb.SystemInfoReply{
+		Resp: pb.SystemInfoReply_SUCCESS,
 	}
+
+	return &resp, nil
 }
 
-// Run is the exported routine that executes the correct function specfic
-// to the the socket type as selected by NewConnection.
-func (conn Connection) Run() {
-	conn.connRoutine()
+func NewConnection(address string, logger *log.Logger) *DataAPIConnection {
+	apiConnection := new(DataAPIConnection)
+	apiConnection.Address = address
+	apiConnection.Logger = logger
+
+	return apiConnection
 }
 
-// Send transmits a byte string using the mangos socket.
-func (conn Connection) Send(msg []byte) {
-	var err error
-	if err = conn.socket.Send(msg); err != nil {
-		conn.logger.Println("error: ", fmt.Sprintf("failed sending: %s", err.Error()))
+func (apiConn *DataAPIConnection) Dial() {
+	// Dial address.
+	conn, err := grpc.Dial(apiConn.Address, grpc.WithInsecure())
+	if err != nil {
+		apiConn.Logger.Fatalf("Could not make connection to server.\nError: %v", err)
 	}
-	if conn.debug {
-		conn.logger.Println("send: ", string(msg))
+	apiConn.Connection = conn
+
+	// Bind as service client.
+	apiClient := pb.NewDataApiClient(apiConn.Connection)
+	apiConn.ApiClient = apiClient
+}
+
+func (apiConn *DataAPIConnection) Listen() {
+	lis, err := net.Listen("tcp", apiConn.Address)
+	if err != nil {
+		apiConn.Logger.Fatalf("failed to listen: %v", err)
+	}
+
+	server := grpc.NewServer()
+	pb.RegisterDataApiServer(server, &ApiHandler{apiConn})
+	if err := server.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
 	}
 }
 
-// Recv receives and returns the byte string received by the connection.
-func (conn Connection) Recv() ([]byte, error) {
-	var msg []byte
-	var err error
-	if msg, err = conn.socket.Recv(); err == nil {
-		if conn.debug {
-			conn.logger.Println("recvd: ", string(msg))
-		}
-		return msg, err
+func (apiConn DataAPIConnection) SendByteMsg(msg []byte) *pb.ByteStringReply {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	byteMsgRequest := pb.ByteStringRequest{ByteString: msg}
+	resp, err := apiConn.ApiClient.SendByteMsg(ctx, &byteMsgRequest)
+	if err != nil {
+		apiConn.Logger.Fatalf("could not send byte msg: %v", err)
 	}
 
-	return msg, err
+	return resp
+}
+
+func (apiConn *DataAPIConnection) SendSystemInfo(sysinfo Collect.SystemInfoStat) *pb.SystemInfoReply {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	systemInfoRequest := pb.SystemInfoRequest{
+		TotalMemory:     sysinfo.TotalMemory,
+		AvailableMemory: sysinfo.AvailableMemory,
+		UsedMemory:      sysinfo.UsedMemory,
+		TotalDisk:       sysinfo.TotalDisk,
+		FreeDisk:        sysinfo.FreeDisk,
+		UsedDisk:        sysinfo.UsedDisk,
+		DiskPath:        sysinfo.DiskPath,
+		Hostname:        sysinfo.Hostname,
+		OS:              sysinfo.OS,
+		Timestamp:       sysinfo.Timestamp,
+	}
+
+	resp, err := apiConn.ApiClient.SendSystemInfo(ctx, &systemInfoRequest)
+	if err != nil {
+		apiConn.Logger.Fatalf("could not send system info: %v", err)
+	}
+
+	apiConn.Logger.Println(sysinfo)
+
+	return resp
 }
